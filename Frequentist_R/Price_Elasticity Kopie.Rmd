@@ -1,0 +1,154 @@
+---
+title: "Price_elasticity_Fee"
+author: "Benjamin Gottlieb"
+date: "2024-01-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(foreign)
+library(tidyverse)
+library(ggdag)
+library(dplyr)
+library(tinytex)
+library(jtools)
+library(huxtable)
+library(summarytools)
+library(ggstance)
+library(pwr)
+library(knitr)
+library(lemon)
+library(AER)
+library(lubridate)
+library(ggplot2)
+library(interflex)
+library(plm)
+library(margins)
+library(stargazer)
+library(fixest)
+library(modelsummary)
+library(pander)
+library(gridExtra)
+library(xtable)
+```
+
+## Border identification Hessen/RPF & Sachsen-Anhalt/ Thüring
+
+```{r}
+water <- read_csv('/Users/Benny/Documents/Masterarbeit/water_imputed.csv')
+colnames(water)
+```
+```{r}
+meanrates <- water %>%
+  group_by(year) %>%
+  summarise(mean_rate=mean(rate_gw))
+meanrates
+```
+
+
+```{r}
+ratesby_state <- water %>%
+  group_by(state_name,year)%>%
+  summarise(rate= first(rate_gw))
+ratesby_state$state_name <- as.factor(ratesby_state$state_name)
+
+mean_rate_state <- ratesby_state %>%
+  group_by(year) %>%
+  summarise(mean_rate=mean(rate))
+mean_rate_state
+```
+
+
+```{r}
+library(ggrepel)
+plot_rate <-  ggplot()+
+        geom_line(data =ratesby_state, aes(x = year, y =rate, color = state_name, group= state_name), show.legend = FALSE)+
+        geom_line(data =mean_rate_state, aes(x = year, y = mean_rate, group= 1, linetype = 'Mean Rate'), color = 'darkred')+
+        geom_point(data =mean_rate_state, aes(x = year, y = mean_rate, group= 1), color = 'darkred', shape =21, size= 3, show.legend = FALSE)+
+        geom_text_repel(data = ratesby_state %>% group_by(state_name) %>% filter(year== max(year)),
+                        aes(x = year, y=rate,label = state_name, color = state_name), 
+                        nudge_x = 0.5,nudge_y = 0,direction = 'y',hjust =0, vjust = 0.5,show.legend = FALSE)+
+        labs(title = "WAF Rate by State Over Time", x = "Year",y = "WAF Rate")+
+        theme_minimal()+
+        theme(plot.title = element_text(hjust=0.5))+
+        scale_y_continuous(breaks = seq(floor(min(ratesby_state$rate)),ceiling(max(ratesby_state$rate)),by = 0.02))+
+        scale_x_continuous(breaks = seq(min(ratesby_state$year), 2019, by =3))+
+        scale_linetype_manual(values= c('Mean Rate'= 'dashed'))+
+        guides(color= guide_legend(override.aes = list(linetype = 'blank')),linetype = guide_legend(title = "Legend"))+
+        theme(legend.position = 'top')
+        
+ggsave('Rate_overtime.png')
+```
+
+```{r}
+water <- select(water,-1)
+water$grund_perfirm <- water$grund/water$n_betriebe_eg
+water$log_grund_perfirm <- log(water$grund_perfirm+1)
+water$log_fremdbezug <- log(water$fremdbezug)
+water$log_rate <- log(water$rate_gw+0.00001)
+```
+
+```{r}
+ggplot(water, aes(log_rate))+
+  geom_histogram()
+```
+
+```{r}
+mod0_pe_y <- feols(log_grund_perfirm~ log_rate |year ,data = water)
+mod0_pe_ys <- feols(log_grund_perfirm~ log_rate |year +state ,data = water)
+mod0_pe_yc <- feols(log_grund_perfirm~ log_rate |year +id_c ,data = water)
+mod1_pe_y <- feols(log_grund_perfirm~ log_rate +log_fremdbezug+log_pop_density+log_gdp+log_mean_precip + log_sw_area |year,data = water)
+mod1_pe_ys <- feols(log_grund_perfirm~ log_rate +log_fremdbezug+log_pop_density+log_gdp+log_mean_precip + log_sw_area |year+ state,data = water)
+mod1_pe_yc <- feols(log_grund_perfirm~ log_rate +log_fremdbezug+log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_perc_gruene |year+ id_c,data = water)
+mod1_pe_ys_polit <- feols(log_grund_perfirm~ log_rate +log_fremdbezug+log_pop_density+log_gdp+log_mean_precip + log_sw_area+ log_perc_gruene |year+ state,data = water)
+
+# comparison only states that have fee
+water_mitfee <- water%>%
+  filter(treated_b == 1)
+mod1_pe_ys_polit_allfee <- feols(log_grund_perfirm~ log_rate +log_fremdbezug+log_pop_density+log_gdp+log_mean_precip + log_sw_area+ log_perc_gruene |year+ state,data = water_mitfee )
+
+etable(mod0_pe_y, mod0_pe_ys,mod1_pe_y,mod1_pe_ys_polit,mod1_pe_yc, mod1_pe_ys_polit_allfee, title = 'Price Elasticity of Water Demand ' )
+elasticities_tex <- etable(mod0_pe_y, mod0_pe_ys,mod1_pe_ys_polit,mod1_pe_yc, mod1_pe_ys_polit_allfee, title = 'Price Elasticity of water demand ', tex = TRUE )
+writeLines(elasticities_tex,'Elastiticities_table.tex')
+```
+```{r}
+confint(mod1_pe_ys)
+```
+
+```{r}
+variables <- c('grund_perfirm','log_grund_perfirm',  'gdp', "mean_precip" , "sw_area","pop_density","fremdbezug" )
+water %>% ungroup
+
+format_number <- function(x) {
+  format(round(x, 2), nsmall = 2, scientific = FALSE, trim = TRUE)
+}
+
+
+descriptives <- water %>%
+  summarise(across(all_of(variables), list(Obs = ~n(),
+       Mean = ~format_number(mean(.,na.rm = TRUE)),
+       SD = ~format_number(sd(.,na.rm = TRUE)),
+       Min = ~format_number(min(., na.rm = TRUE)),
+       Max = ~format_number(max(., na.rm = TRUE))),
+       .names= "{.fn}_{.col}")) %>%
+  pivot_longer(cols = everything(), names_to = c(".value","variable"), names_pattern = "([^_]+)_(.+)")
+
+
+descriptives
+```
+
+
+```{r}
+descriptive_table <- kable(descriptives,"latex", booktabs = TRUE, caption = "Descriptive statistics.") %>%
+  kable_styling(latex_options = c( "scale_down"))
+
+writeLines(as.character(descriptive_table),'Descriptive_table_RPFSA.tex')
+
+```
+```{r}
+descriptive_table
+```
+

@@ -1,0 +1,165 @@
+---
+title: "Descriptives"
+author: "Benjamin Gottlieb"
+date: "2024-01-30"
+output: html_document
+---
+```{r}
+library(foreign)
+library(tidyverse)
+library(ggdag)
+library(dplyr)
+library(tinytex)
+library(jtools)
+library(huxtable)
+library(summarytools)
+library(ggstance)
+library(pwr)
+library(knitr)
+library(lemon)
+library(AER)
+library(lubridate)
+library(ggplot2)
+library(interflex)
+library(plm)
+library(margins)
+library(stargazer)
+library(fixest)
+library(modelsummary)
+library(pander)
+library(gridExtra)
+library(xtable)
+library(kableExtra)
+```
+
+```{r}
+water <- read_csv('/Users/Benny/Documents/Masterarbeit/water_baysian.csv')
+colnames(water)
+```
+
+```{r}
+water$fremdbezug_pf <- water$fremdbezug/water$n_betriebe_eg
+```
+
+
+```{r}
+variables <- c('grund_perfirm','log_grund_perfirm',  'gdp', "mean_precip" , "sw_area","pop_density","fremdbezug_pf" )
+water %>% ungroup
+
+format_number <- function(x) {
+  format(round(x, 2), nsmall = 2, scientific = FALSE, trim = TRUE)
+}
+
+
+descriptives <- water %>%
+  summarise(across(all_of(variables), list(Obs = ~sum(!is.na(.)),
+       Mean = ~format_number(mean(.,na.rm = TRUE)),
+       SD = ~format_number(sd(.,na.rm = TRUE)),
+       Min = ~format_number(min(., na.rm = TRUE)),
+       Max = ~format_number(max(., na.rm = TRUE))),
+       .names= "{.fn}_{.col}")) %>%
+  pivot_longer(cols = everything(), names_to = c(".value","variable"), names_pattern = "([^_]+)_(.+)")
+
+log_grund_treated <- water %>%
+  filter(treated_b==1) %>%
+  summarise(
+    variable = "log_grund_perfirm_treated",
+    Obs = sum(!is.na(log_grund_perfirm)),
+    Mean = format_number(mean(log_grund_perfirm, na.rm = TRUE)),
+    SD = format_number(sd(log_grund_perfirm, na.rm = TRUE)),
+    Min = format_number(min(log_grund_perfirm, na.rm = TRUE)),
+    Max = format_number(max(log_grund_perfirm, na.rm = TRUE))
+  ) %>%
+  pivot_longer(cols = c("Mean", "SD", "Min", "Max"), names_to = ".value", values_to = "treated")
+
+log_grund_untreated<- water %>%
+  filter(treated_b==0) %>%
+  summarise(
+    variable = "log_grund_perfirm_untreated",
+    Obs = sum(!is.na(log_grund_perfirm)),
+    Mean = format_number(mean(log_grund_perfirm, na.rm = TRUE)),
+    SD = format_number(sd(log_grund_perfirm, na.rm = TRUE)),
+    Min = format_number(min(log_grund_perfirm, na.rm = TRUE)),
+    Max = format_number(max(log_grund_perfirm, na.rm = TRUE))
+  ) %>%
+  pivot_longer(cols = c("Mean", "SD", "Min", "Max"), names_to = ".value", values_to = "untreated")
+
+first_slice <- descriptives %>%
+  slice(1:2)
+
+second_slice <-  descriptives%>%
+  slice(3:n())
+  
+
+
+  #select(variable,treated_b, Mean= Mean_log_grund_per_firm, SD= SD_log_grund_per_firm)
+combined_summary <- bind_rows(first_slice, log_grund_untreated, log_grund_treated, second_slice)
+combined_summary
+#mutate(variable = 'log_grund_perfirm',)
+```
+```{r}
+new_variables <- c('Groundwater Abstractions','log-GW Abstractions','log-GW Abstraction (T=0)','log-GW Abstraction (T=1)','GDP', 'Precipitation', 'Surface Water Area',
+                   'Population density', 'External water supply')
+
+combined_summary$variable <- new_variables
+descriptives <- combined_summary %>%
+  rename(Variable=variable)
+
+descriptives
+```
+
+```{r}
+descriptive_table <- kable(descriptives,"latex", booktabs = TRUE, caption = "Descriptive Statistics Germany (Per-county)  ") %>%
+  kable_styling(latex_options = c( "scale_down")) %>%
+  footnote(general = "Groundwater abstractions and External water supply are measured in 1000 m\\(^3\\), GDP in 1000 €,  Precipitation as a annual sum at station in mm, Surface water area in m$^2$,Population density in people/km$^2$; External Water supply consists of public supply and water acquired from other sources such as Companies or organisations. T denotes whether counties had a fee (1) or did not (0)",
+           general_title = 'Note: ',
+           footnote_as_chunk = TRUE,
+           threeparttable = TRUE)
+
+writeLines(as.character(descriptive_table),'Descriptive_table_all.tex')
+
+```
+
+
+```{r}
+water_rpfsa <- water %>%
+  filter(match_rpf_sa == TRUE)
+
+
+
+descriptives_rpfsa <- water_rpfsa %>%
+  group_by(treated_b) %>%
+  summarise(across(all_of(variables), list(Mean = ~format_number(mean(.,na.rm = TRUE)), SD = ~format_number(sd(.,na.rm = TRUE))),
+       .names= "{.fn}_{.col}")) 
+
+descriptives_wide <- descriptives_rpfsa %>%
+  pivot_longer(cols = -treated_b, names_to = c("statistic", "variable"), names_pattern = "([^_]+)_(.+)") %>%
+  pivot_wider(names_from = c("treated_b", "statistic"), values_from = value)
+
+names(descriptives_wide)[2] <- 'Mean (T=0)'
+names(descriptives_wide)[3] <- 'SD (T=0)'
+names(descriptives_wide)[4] <- 'Mean (T=1)'
+names(descriptives_wide)[5] <- 'SD (T=1)'
+
+descriptives_rpfsa <- kable(descriptives_wide, 'latex',booktabs = TRUE, caption = "Descriptive statistics RPF SA by treatment") %>%
+  kable_styling(latex_options = c("scale_down"))
+
+writeLines(as.character(descriptives_rpfsa), "descriptives_rpfsa.tex")
+```
+
+```{r}
+descriptives_wide
+```
+
+
+
+
+```{r}
+descriptives_rpfsa_R <- water_rpfsa %>%
+  group_by(treated_b) %>%
+  summarise(across(all_of(variables), list(Mean = ~format_number(mean(.,na.rm = TRUE)), SD = ~format_number(sd(.,na.rm = TRUE))),
+       .names= "{.fn}_{.col}")) 
+
+descriptives_rpfsa_R
+```
+

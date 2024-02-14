@@ -1,0 +1,485 @@
+---
+title: "Untitled"
+author: "Benjamin Gottlieb"
+date: "2024-01-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+# Load packages
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(zoo)
+library(did)
+library(lubridate)
+library(googledrive)
+library(ggplot2)
+library(fixest)
+library(readr)
+library(summarytools)
+library(modelsummary)
+library(interflex)
+library(pander)
+```
+
+```{r}
+water <- read_csv('/Users/Benny/Documents/Masterarbeit/water_imputed.csv')
+water <- water %>%
+  filter(treated_b == TRUE)
+
+water$grund_perfirm <- water$grund/water$n_betriebe_eg
+water <- water %>%
+  mutate(post = if_else(year >= first_rate_change_year, 1, 0))
+water
+```
+```{r}
+coltokeep = c('year','id_c','state',"first_rate_change_year","ever_treated", "rate_change_treatment_indicator", "event_time_rate_change",'grund_perfirm' ,'high_gw_rate','rate_gw',  "log_gdp" , "log_mean_precip" ,                "log_sw_area","log_pop_density","log_fremdbezug",'post')
+
+
+water_ratechange <- water[coltokeep]
+water_ratechange$log_grund_perfirm <- log(water_ratechange$grund_perfirm+1)
+water_onechange <- water_ratechange %>%
+  filter(state %in% c(1, 3,4,5,8,11,12,14))
+
+water_onechange_cities_excluded <- water_ratechange %>%
+  filter(state %in% c(1, 3,5,8,12,14))
+
+water_onechange <- water_onechange %>% 
+  rename(tp = rate_change_treatment_indicator)
+
+water_ratechange <- water_ratechange %>% 
+  rename(tp = rate_change_treatment_indicator)
+
+
+
+water_onechange_cities_excluded <- water_onechange_cities_excluded %>% 
+  rename(tp = rate_change_treatment_indicator)
+
+water_ratechange <- water_ratechange %>%
+  mutate(ln_rate = log(rate_gw + 0.00001))
+
+water_onechange <- water_onechange %>%
+  mutate(ln_rate = log(rate_gw + 0.00001))
+
+water_onechange_cities_excluded <- water_onechange_cities_excluded %>%
+  mutate(ln_rate = log(rate_gw + 0.00001))
+
+
+
+# rate_change_treatment indicator
+
+mod1_rate <- feols(log_grund_perfirm~ tp +ln_rate +log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | state + year , data = water_ratechange )
+mod1_rate_county <- feols(log_grund_perfirm~ tp +ln_rate+log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | id_c + year , data = water_ratechange )
+mod2_rate_interaction_rate <- feols(log_grund_perfirm~ tp*ln_rate + log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | state + year , data = water_ratechange )
+mod2_rate_interaction_rate2 <- feols(log_grund_perfirm~ post*ever_treated*ln_rate + log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | state + year , data = water_ratechange )
+etable(mod1_rate,mod1_rate_county,mod2_rate_interaction_rate)
+
+```
+water$first_rate_change_year
+```{r}
+unique(water$first_rate_change_year)
+```
+
+## Only 8 states with one or zero rate change
+```{r}
+# filter for states Brandenburg, Schleswig-Holstein, Nidersachsen NRW , Baden-Würtemberg and Sachsen Anhalt, Bremen and Berlin 
+# coltokeep = c('year','id_c','state',"first_rate_change_year","ever_treated", "rate_change_treatment_indicator", "event_time_rate_change",'grund_perfirm' ,'high_gw_rate','rate_gw',  "log_gdp" , "log_mean_precip" ,                "log_sw_area","log_pop_density","log_fremdbezug")
+
+
+
+# ever treated is T
+water_onechange %>%
+  filter(ever_treated==0) %>%
+  select(state) %>%
+  distinct()
+
+water_onechange %>%
+  filter(ever_treated==1) %>%
+  select(state) %>%
+  distinct()
+
+water_onechange %>%
+  filter(state == 4 )%>%
+  count()
+
+```
+
+
+```{r}
+
+```
+```{r}
+write_csv(water_onechange, 'water_rate_change.csv')
+```
+```{r}
+colnames(water_onechange)
+```
+
+
+```{r}
+mod1_rate_onechange <- feols(log_grund_perfirm~ tp+ln_rate +log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | state + year , data = water_onechange )
+onechange_ohneblnbremen <- feols(log_grund_perfirm~ tp +ln_rate+ log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | state + year , data = water_onechange_cities_excluded )
+mod1_rate_onechange_county <- feols(log_grund_perfirm~ tp+ln_rate +log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | id_c + year , data = water_onechange )
+onechange_ohneblnbremen_county <- feols(log_grund_perfirm~ tp +ln_rate+ log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | id_c + year , data = water_onechange_cities_excluded )
+# Interaction
+mod1_rate_onechange_rate <- feols(log_grund_perfirm~ tp*ln_rate + log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | state + year , data = water_onechange )
+
+# one Berlin & Bremen
+```
+
+
+```{r}
+
+
+ratechange_latex_table <- etable(mod1_rate_onechange,onechange_ohneblnbremen,mod1_rate_onechange_county,mod1_rate,mod1_rate_onechange_rate,mod2_rate_interaction_rate,headers = c('rate8','rate6', 'rate8_county','rate_13', 'Interacted_8','Interacted_13' ), keep = c('tp','ln_rate','tp x ln_rate'), style.df = style.df(depvar.title = '',fixef.title = '',fixef.suffix = ' fixed effect',yesNo = 'yes'), postprocess.df =pandoc.table.return, tex = TRUE)
+writeLines(ratechange_latex_table, 'ratechange_latex_table.tex')
+```
+```{r}
+meanlog_rate <- water_onechange %>%
+                summarise(mean=mean(ln_rate))
+
+ATE1 <- -1.13+ meanlog_rate*-0.41
+print(ATE1)
+print(meanlog_rate)
+```
+```{r}
+ratechange_latex_table
+```
+
+```{r}
+water_onechange$ever_treated <- as.factor(water_onechange$ever_treated)
+plot2 <- ggplot(water_onechange, aes(year, log_grund_perfirm,col =ever_treated))+
+  stat_summary(geom = 'line') + 
+  geom_vline(xintercept = 2013) + 
+  labs(title = 'Logged Abstractions per firm')+
+  scale_x_continuous(breaks = c(2007,2010,2013,2016, 2019))+
+  theme(plot.title = element_text(hjust= 0.5))
+plot2
+```
+
+```{r}
+water_onechange_ordered <- water_onechange %>%
+  arrange(year, state)
+
+water_onechange_ordered[241,]
+
+```
+
+
+```{r}
+# Assuming your dataframe is named `df`
+library(tibble)
+water_onechange_ordered <- na.omit(water_onechange_ordered)
+water_onechange_ordered <- data.frame(water_onechange_ordered)
+water_onechange_ordered
+```
+
+
+```{r}
+
+mfp_rate <- interflex(Y="log_grund_perfirm",D = "tp",X = "rate_gw", Z=c('log_pop_density','log_gdp','log_mean_precip', 'log_sw_area','log_fremdbezug'), FE = c("year", "state"),main=NULL,estimator = "binning",data = water_onechange_ordered,vcov.type =  "cluster", cl ="state",weights = NULL, na.rm = TRUE)
+mfp_log_rate<- interflex(Y="log_grund_perfirm",D = "tp",X = "ln_rate", Z=c('log_pop_density','log_gdp','log_mean_precip', 'log_sw_area','log_fremdbezug'), FE = c("year", "state"),main= 'Marginal effect of Rate change',estimator = "binning",data = water_onechange_ordered,nbins = 2,vcov.type =  "cluster", cl ="state",weights = NULL, na.rm = TRUE ,xlab = '(log) WAF rate', ylab = 'Effect of rate change')
+
+
+
+
+interflex(estimator = "raw",Y = "log_grund_perfirm", D = "tp", X = "ln_rate", data = water_onechange_ordered, weights = NULL, Ylabel = "Outcome", Dlabel = "Treatment", Xlabel="Moderator", main = "Raw Plot", cex.main = 1.2, ncols=2, ylab = 'Marginal effect of Rate change',xlab = 'Higher rate')
+
+
+```
+
+
+
+```{r}
+confint(mod1_rate_onechange)
+confint(mod1_rate_onechange_rate)
+```
+
+
+```{r}
+ratechange_latex_table <-etable(mod1_rate_onechange,onechange_ohneblnbremen,mod1_rate_onechange_county,mod1_rate,mod1_rate_onechange_rate, mod2_rate_interaction_rate,
+                                headers = c('rate9','rate7', 'rate9_county','rate_13', 'Interacted_9','Interacted_13' ), keep = c('tp','ln_rate','tp x ln_rate'), style.df = style.df(depvar.title = '',fixef.title = '',fixef.suffix = ' fixed effect',yesNo = 'yes'), postprocess.df =pandoc.table.return, tex = TRUE)
+writeLines(ratechange_latex_table, 'ratechange_latex_table.tex')
+```
+
+
+
+```{r}
+water_ratechange %>%
+  group_by(ever_treated)%>%
+  count
+
+```
+
+```{r}
+water_ratechange %>%
+  group_by(state)%>%
+  count()
+
+
+
+ggplot(water_ratechange, aes(x=event_time_rate_change))+
+geom_bar(stat="count")+
+labs(x='event time', y='count', title='Time since start of treatment')
+```
+
+
+```{r}
+# select for all observations with rate change
+staggered_wateralltreated <- water_onechange %>%
+  filter(event_time_rate_change > -10)
+```
+
+
+### Staggered treatment Event study- Among set All get treated 
+```{r}
+ggplot(staggered_wateralltreated, aes(x=event_time_rate_change))+
+geom_bar(stat="count")+
+labs(x='event time', y='count', title='Time since start of treatment')
+```
+
+
+
+
+```{r}
+mod1_rate_onechange <- feols(log_grund_perfirm~ tp+ ln_rate+log_pop_density+log_gdp+log_mean_precip + log_sw_area +log_fremdbezug  | state + year , data = water_onechange )
+
+staggered_wateralltreated$allones <- 1
+mod_twfe = feols(log_grund_perfirm ~ i(event_time_rate_change, ref=0)+ln_rate+ log_fremdbezug+log_pop_density+log_gdp+log_mean_precip+ log_sw_area |state +  year , data=staggered_wateralltreated)
+
+tidy(mod_twfe, conf.int = TRUE)
+iplot(mod_twfe,
+xlab = 'Time to treatment',
+main = 'Event study: Staggered treatment (TWFE)- constant rate')
+```
+
+
+```{r}
+water_onechange
+```
+
+
+```{r}
+staggered_wateralltreated2 <- water_ratechange 
+
+
+staggered_wateralltreated2$year <- as.integer(staggered_wateralltreated2$year)
+
+staggered_wateralltreated2 <- staggered_wateralltreated2 %>%
+  mutate(first_rate_change_year = case_when(
+    first_rate_change_year == 2007 ~ 1,
+    first_rate_change_year == 2010 ~ 2,
+    first_rate_change_year == 2013 ~ 3,
+    first_rate_change_year == 2016 ~ 4,
+    first_rate_change_year == 2019 ~ 5,
+))
+
+staggered_wateralltreated2 <- staggered_wateralltreated2 %>%
+  mutate(year = case_when(
+    year == 2007 ~ 1,
+    year == 2010 ~ 2,
+    year == 2013 ~ 3,
+    year == 2016 ~ 4,
+    year == 2019 ~ 5,
+))
+
+head(staggered_wateralltreated2)
+```
+
+```{r}
+na_count <- staggered_wateralltreated2 %>%
+  summarise(across(everything(), ~ sum(is.na(.))))
+
+# Print the result
+print(na_count)
+
+
+
+na_count <- staggered_wateralltreated2 %>%
+  summarise(across(everything(), ~ sum(is.na(.))))
+
+# Print the result
+print(na_count)
+
+
+```
+
+```{r}
+colnames(water_onechange)
+```
+
+
+```{r}
+water_onechange <- water_onechange %>%
+  mutate(first_rate_change_year= if_else(is.na(first_rate_change_year),0,first_rate_change_year))
+
+water_onechange$state <- as.factor(water_onechange$state)
+
+event_mod_4v4 <- att_gt(yname = 'log_grund_perfirm',
+                        tname = 'year',
+                        idname= 'id_c',
+                        gname = 'first_rate_change_year',
+                        control_group = 'notyettreated',
+                        data = water_onechange,
+                        xformla = ~log_fremdbezug+log_pop_density+log_gdp+log_mean_precip+ log_sw_area,
+                        allow_unbalanced_panel = TRUE)
+
+nobs8 <- water_onechange %>%
+  count()
+nobs8 <- nobs8 - 4
+nobs8
+```
+
+
+```{r}
+att_4v4 <- aggte(event_mod_4v4, type = 'simple',clustervars = c('id_c') , na.rm = TRUE)
+time_eff_4v4 <- aggte(event_mod_4v4, type = 'dynamic',clustervars = c('id_c') , na.rm = TRUE)
+group_eff_4v4 <- aggte(event_mod_4v4, type = 'group',clustervars = c('id_c') , na.rm = TRUE)
+calendar_eff_4v4 <- aggte(event_mod_4v4, type = 'calendar',clustervars = c('id_c') , na.rm = TRUE)
+
+```
+
+
+
+
+
+
+```{r}
+ggdid(time_eff_4v4, title = 'Event-Study Callaway Sant Anna 4v4' )
+```
+
+
+
+
+
+
+
+
+```{r}
+staggered_wateralltreated2 <- staggered_wateralltreated2 %>%
+  mutate(first_rate_change_year= if_else(is.na(first_rate_change_year),0,first_rate_change_year))
+```
+
+
+```{r}
+staggered_wateralltreated2$state <- as.factor(staggered_wateralltreated2$state)
+
+model1 <- att_gt(yname = 'log_grund_perfirm',
+                tname = 'year', # year oder eventime?
+                idname = 'id_c', # id var
+                gname = 'first_rate_change_year', # first treatment period
+                control_group = 'notyettreated',
+                data = staggered_wateralltreated2, 
+                
+                xformla =  ~log_fremdbezug+log_pop_density+log_gdp+log_mean_precip+ log_sw_area   ,# Controls
+                allow_unbalanced_panel = TRUE)
+
+
+staggered_wateralltreated2$state <- as.numeric(staggered_wateralltreated2$state)
+
+model2 <- att_gt(yname = 'log_grund_perfirm',
+                tname = 'year', # year oder eventime?
+                idname = 'state', # id var
+                gname = 'first_rate_change_year', # first treatment period
+                control_group = 'notyettreated',
+                data = staggered_wateralltreated2, 
+                xformla =  ~ log_fremdbezug+log_pop_density+log_gdp+log_mean_precip+ log_sw_area   ,# Controls
+                allow_unbalanced_panel = TRUE)
+
+nobs13 <- staggered_wateralltreated2 %>%
+  count()
+nobs13 <- nobs13-18
+nobs13
+model2
+```
+
+
+```{r}
+agg.simple <- aggte(model1, type = "simple", na.rm = TRUE)
+agg2.simple <- aggte(model2, type = "simple", na.rm = TRUE)
+summary(agg2.simple)
+```
+```{r}
+agg.es <- aggte(model1, type = "dynamic", na.rm = TRUE)
+agg2.es <- aggte(model2, type = "dynamic", na.rm = TRUE)
+
+summary(agg2.es)
+ggdid(agg.es, title = 'Event-Study Callaway Sant Anna all 13 States' )
+ggdid(agg2.es, title = 'Event-Study Callaway Sant Anna all 13 States - State Fixed Effects' )
+```
+
+
+
+
+```{r}
+water_onechange %>%
+  count()
+
+965-4 
+```
+```{r}
+att_4v4 <- tidy(att_4v4)
+```
+
+
+```{r}
+
+agg.simple <- tidy(agg.simple)
+```
+
+
+```{r}
+att_4v4[2]
+```
+
+
+```{r}
+simple_table <- data.frame(
+  Model = c("ATT", "Std_error","CI_low","CI_high", "Obs"),
+  Model_8 = c(att_4v4$estimate, att_4v4$std.error,att_4v4$conf.low, att_4v4$conf.high , (nobs8$n)),
+  Model_13 = c(agg.simple$estimate, agg.simple$std.error,agg.simple$conf.low,agg.simple$conf.high,nobs13$n))
+
+simple_latex_table <- kable(simple_table, "latex", booktabs = TRUE, caption = "Simple Results - 8 vs 13 States comparison", digits = 3)%>%
+  kable_styling(latex_options = c( "scale_down"))
+writeLines(c("%!TEX root = ./YourMainTexDocument.tex", simple_latex_table),
+           "Simple_Anna_results_table.tex")
+
+```
+
+```{r}
+
+
+# View the restructured table
+simple_table
+```
+
+```{r}
+ATT_dynamic_table <- data.frame(Eventtime='ATT',Estimate= time_eff_4v4$overall.att, Std_error= time_eff_4v4$overall.se, CI_low = NA, CI_high=NA)
+time_eff_4v4 <- tidy(time_eff_4v4)
+
+dynamic_table <- data.frame(
+ Eventtime =time_eff_4v4$event.time,
+  Estimate = time_eff_4v4$estimate,
+  Std_error =time_eff_4v4$std.error,
+  CI_low =time_eff_4v4$conf.low,
+  CI_high =time_eff_4v4$conf.high )
+dynamic_table <- rbind(dynamic_table,ATT_dynamic_table)
+```
+
+
+```{r}
+
+
+dynamic_latex_table <- kable(dynamic_table, "latex", booktabs = TRUE, 
+                     caption = "Summary of Dynamic Results M8", digits =3) %>%
+  kable_styling(latex_options = c( "scale_down"))
+writeLines(c("%!TEX root = ./YourMainTexDocument.tex", dynamic_latex_table),
+           "Eventstudy_results_table.tex")
+```
+
+
+
